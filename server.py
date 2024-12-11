@@ -1,73 +1,154 @@
 import socket
 import threading
-import sys 
+import sys
+import os 
 
 class Server:
     
     def __init__(self):
         self.clients = {}
-        self.default = "\033[m"
-        self.red = "\03391[m"
-        # self.port = sys.argv[0]
-        self.port = 5050
-        self.host = socket.gethostbyname(socket.gethostname())
         
+        # Ensures port number has been passed 
+        try:
+            self.port = int(sys.argv[1])
+        except Exception:
+            print('Please provide a valid port number')
+            sys.exit(1)  
+        
+        # Sets the server up
+        self.host = socket.gethostbyname(socket.gethostname())
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.bind((self.host, self.port))
+        
+        self.server.bind((self.host, self.port))   
         self.server.listen()
-            
+        
+        print(f'Server is running on {self.host}') 
+    
     def broadcast(self, message, sender):
-        # print('Looping to send message')
+        # Broadcasts message to all connected clients other than the sender
         for client in self.clients.values():
             if client != sender:
                 client.send(message)
     
     def private_message(self, client, message):
-        print('here pt3')
+        # Sends a private message to the specified user
         client.send(message)
-          
+    
+    def access(self, client):
+        # Counts the number of files and sends it back to the user
+        file_list = os.listdir('SharedFiles')
+
+        files_len = len(file_list)
+        
+        message = f'Access granted. {files_len} files are in the folder'.encode('utf-8')
+        client.send(message)     
+    
+    def listsharedfiles(self, client):
+        # Sends all the names of the files in the shared user folder
+        file_list = os.listdir('SharedFiles')
+        message = ''
+
+        for file in file_list:
+            message =  message + ' ' + file
+        message = message.encode('utf-8')
+        client.send(message)   
+    
+    def send_file(self, client, filename):
+        try:
+            filename = filename.decode('utf-8')
+            # Opens the file that was requested
+            file = open(f'SharedFiles/{filename}', 'rb')
+            
+            # Calculates size of requested file
+            size = os.path.getsize(f'SharedFiles/{filename}')
+            size = str(size)
+
+            # Indication that the server is about to start sending data
+            client.send(b'/download')
+            
+            # Header data for file
+            client.send(size.encode('utf-8'))
+            client.send(filename.encode('utf-8'))
+            
+            # Reads file
+            file_data = file.read()
+            file.close()
+            
+            # Sends file to the client 
+            client.sendall(file_data)
+        
+        except:
+            # Tells the client the file requested does not exist
+            client.send(b'/notexist') 
+                
     def handle(self, client):
+        access = False
         while True:
             try:
+                # Receives message from the client
                 message = client.recv(1024)
-                # T0DO MAKE FIRST TWO CHARS PM AND EXTRACT NICKNAME OF PM
-                # CHECK HERE FOR THE FIRST TWO CHARS
-                # IF FIRST 2 CHARS == PM THEN DO A PRIV MSG
-                # CLIENT SIDE ISSUE
-                print(message[:2])
-                # print('Server has received message')
-                # print(message[-5:])
-                if message[-5:] == b'/exit':
+                
+                # Check if the client wants to leave
+                if message == b'/exit':
+                    # Tell the client that the server is closing the connection
+                    client.send(message)
                     self.close(client)
                     break
                 
+                # Check if the client is requesting access to the shared files
+                elif message == b'/access':
+                    # Grant access
+                    access = True
+                    self.access(client)
+                
+                # Check if the client is requesting a list of the sharedfiles
+                elif message == b'/listsharedfiles':
+                    # Check if the client has access
+                    if access:
+                        # Send the list of files
+                        self.listsharedfiles(client)
+                    else:
+                        # Tell the client they don't have access
+                        message = 'You do not have access'.encode('utf-8')
+                        client.send(message)    
+                
+                # Check if the client has requested a file
+                elif message[:10] == b'/download ':
+                    # Check if the client has access
+                    if access:
+                        # Send the file
+                        self.send_file(client, message[10:])
+                    else:
+                        # Tell the client they don't have access
+                        message = 'You do not have access'.encode('utf-8')
+                        client.send(message)   
+                
+                #T0DO FIX PM
+                # Check if the client is private messaging someone       
                 elif message[:2] == b'pm':
-                    print('here')
                     message = message.decode('utf-8')
+                    # Extract the nickname of the client they are trying to message
                     leng = int(message[2]) + 2
                     nick = message[3:leng+1]
-                    print(len(nick))
-                    # print(self.clients)
-                    # print(len(nick))
                     
                     try:
-                        print('herept2')
+                        # Send the client's message to the requested client
                         receiver = self.clients[nick]
                         message = '[PRIVATE MESSAGE] ' + message[leng+1:]
                         message = message.encode('utf-8')
-                        print('lolllhere')
                         self.private_message(receiver, message)
-                        
                     
                     except:
-                        message = f'{nick} doesnt exist wanker'.encode('utf-8')
+                        # Tell the client the requested client does not exist
+                        message = f'{nick} does not exist'.encode('utf-8')
                         client.send(message)
                                
-                
                 elif message:
+                    # Broadcast the message if it is not empty
                     self.broadcast(message, client)
            
             except:
+                # Close the connection if there is an error
                 self.close(client)
                 break
     
@@ -75,29 +156,45 @@ class Server:
         for key, value in self.clients.items():
             
             if value == client:
-                print(f'{key} has dced')
+                # Broadcast that the client has left
+                message = (f'{key} has left')
+                message = message.encode('utf-8')
+                self.broadcast(message, client)
+                
+                # Remove the client from the connected client dictionary
                 self.clients.pop(key)
                 break
+        
         client.close()
     
     def receive(self):
         while True:
-            
+            # Accept new connections
             client, address = self.server.accept()
+            # Ask for a username
             client.send('nickname'.encode('utf-8'))
-            # print('Server has asked for a name')
             
             nickname = client.recv(1024).decode('utf-8')
+            # Check if the username is already in use
+            if nickname in self.clients:
+                # Ask the client to pick a different username
+                client.send('This nickname has already been chosen, pick a different one'.encode('utf-8'))
+                client.close()
+
+            print(f'IP Address : {address[0]} || Port Number : {address[1]}')
+            
+            # Send welcome message
             message = f'Welcome {nickname}'.encode('utf-8')
-            # print('Server is sending welcome message')
             client.send(message)
             
-            connection_message = f'\n {nickname} has connected '
+            # Broadcast a new client has joined
+            connection_message = f'{nickname} has joined'
             connection_message= connection_message.encode('utf-8')
             self.broadcast(connection_message, client)
             
             self.clients[nickname] = client
             
+            # Handle the new client in a seperate thread
             thread = threading.Thread(target=self.handle, args=(client,))
             thread.start()
     
@@ -105,5 +202,4 @@ class Server:
                 
 
 server = Server()
-print('Server is starting')
 server.receive()
