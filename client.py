@@ -3,6 +3,7 @@ import sys
 import threading
 import os
 import time
+from io import StringIO
 
 class Client():
     
@@ -20,6 +21,10 @@ class Client():
         except IndexError:
             print('Please pick a nickname')
             sys.exit(1)  
+        
+        if self.nickname[0] == '/' or self.nickname[:2] ==  'pm':
+            print('Please choose a nickname that does not begin with / or pm')
+            sys.exit(1)
         
         try:
             self.hostname  = sys.argv[2]
@@ -47,9 +52,10 @@ class Client():
     def file_receive(self):
         
         # Receive header information from the client
-        size = self.client.recv(1024).decode('utf-8')
-        size = int(size)
-        filename = self.client.recv(1024).decode('utf-8')
+        header = self.client.recv(1024).decode().strip()
+        header = header.split('\n')
+        size = int(header[0])
+        filename = header[1]
 
         folder = self.nickname
         filepath = f'{self.nickname}/{filename}'
@@ -82,7 +88,9 @@ class Client():
                 # Send nickname if requested
                 if message == 'nickname':
                     self.client.send(self.nickname.encode('utf-8'))
-                
+                elif message == '/badnickname':
+                    self.run_state = False
+                    print('Pick a different nickname')
                 # Break the receive loop if the client is exiting    
                 elif message == '/exit':
                     print('Successfully exited')
@@ -102,13 +110,14 @@ class Client():
                     print(f'{message}')
             
             # Error handling
-            except:
+            except Exception as e:
                 # Print error message and break the loop
-                print("An error occured!")
+                print(f"The following error has occured : {e}")
                 self.run_state = False
         
-        # If the loop has broken
-        # Close the connection        
+        
+        # Close the connection
+        sys.stdin = StringIO('close')      
         self.client.close()
     
     def command(self, message):
@@ -197,8 +206,7 @@ class Client():
             
             except:
                 # Break the loop and close the connection
-                self.run_state = False
-                self.client.close()        
+                self.run_state = False        
 
 client = Client()
 

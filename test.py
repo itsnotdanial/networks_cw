@@ -8,8 +8,6 @@ class Client():
         self.messaged_user = ''
         
         self.run_state = True
-        self.default = "\033[m"
-        self.red = "\03391[m"
         
         self.nickname = sys.argv[1]
         # self.hostname  = sys.argv[1]

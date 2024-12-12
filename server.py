@@ -3,6 +3,8 @@ import threading
 import sys
 import os 
 
+SERVER_SHARED_FILES = os.getenv('SERVER_SHARED_FILES', os.path.join(os.getcwd(), 'SharedFiles'))
+
 class Server:
     
     def __init__(self):
@@ -36,39 +38,47 @@ class Server:
     
     def access(self, client):
         # Counts the number of files and sends it back to the user
-        file_list = os.listdir('SharedFiles')
+        try:
+            file_list = os.listdir(SERVER_SHARED_FILES)
 
-        files_len = len(file_list)
+            files_len = len(file_list)
         
-        message = f'Access granted. {files_len} files are in the folder'.encode('utf-8')
-        client.send(message)     
+            message = f'Access granted. {files_len} files are in the folder'.encode('utf-8')
+            client.send(message)
+        except:
+            message = f'Folder does not exist'.encode('utf-8')
+            client.send(message)        
     
     def listsharedfiles(self, client):
         # Sends all the names of the files in the shared user folder
-        file_list = os.listdir('SharedFiles')
-        message = ''
+        try:
+            file_list = os.listdir(SERVER_SHARED_FILES)
+            message = ''
 
-        for file in file_list:
-            message =  message + ' ' + file
-        message = message.encode('utf-8')
-        client.send(message)   
+            for file in file_list:
+                message =  message + ' ' + file
+            message = message.encode('utf-8')
+            client.send(message)   
+        except:
+            message = 'Folder is empty'.encode('utf-8')
+            client.send(message)
     
     def send_file(self, client, filename):
         try:
             filename = filename.decode('utf-8')
             # Opens the file that was requested
-            file = open(f'SharedFiles/{filename}', 'rb')
+            file = open(f'{SERVER_SHARED_FILES}/{filename}', 'rb')
             
             # Calculates size of requested file
-            size = os.path.getsize(f'SharedFiles/{filename}')
+            size = os.path.getsize(f'{SERVER_SHARED_FILES}/{filename}')
             size = str(size)
-
+            
             # Indication that the server is about to start sending data
             client.send(b'/download')
             
             # Header data for file
-            client.send(size.encode('utf-8'))
-            client.send(filename.encode('utf-8'))
+            header = f'{size}\n{filename}'.encode('utf-8')
+            client.send(header)
             
             # Reads file
             file_data = file.read()
@@ -101,7 +111,7 @@ class Server:
                     access = True
                     self.access(client)
                 
-                # Check if the client is requesting a list of the sharedfiles
+                # Check if the client is requesting a list of the shared files
                 elif message == b'/listsharedfiles':
                     # Check if the client has access
                     if access:
@@ -123,7 +133,6 @@ class Server:
                         message = 'You do not have access'.encode('utf-8')
                         client.send(message)   
                 
-                #T0DO FIX PM
                 # Check if the client is private messaging someone       
                 elif message[:2] == b'pm':
                     message = message.decode('utf-8')
@@ -178,26 +187,28 @@ class Server:
             # Check if the username is already in use
             if nickname in self.clients:
                 # Ask the client to pick a different username
-                client.send('This nickname has already been chosen, pick a different one'.encode('utf-8'))
+                message = f'/badnickname'.encode('utf-8')
+                client.send(message)
                 client.close()
+            else:
+                print(f'IP Address : {address[0]} || Port Number : {address[1]}')
+                
+                # Send welcome message
+                message = f'Welcome {nickname}'.encode('utf-8')
+                client.send(message)
+                
+                # Broadcast a new client has joined
+                connection_message = f'{nickname} has joined'
+                connection_message= connection_message.encode('utf-8')
+                self.broadcast(connection_message, client)
+                
+                # Add new client to dictionary
+                self.clients[nickname] = client
+                
+                # Handle the new client in a seperate thread
+                thread = threading.Thread(target=self.handle, args=(client,))
+                thread.start()
 
-            print(f'IP Address : {address[0]} || Port Number : {address[1]}')
-            
-            # Send welcome message
-            message = f'Welcome {nickname}'.encode('utf-8')
-            client.send(message)
-            
-            # Broadcast a new client has joined
-            connection_message = f'{nickname} has joined'
-            connection_message= connection_message.encode('utf-8')
-            self.broadcast(connection_message, client)
-            
-            self.clients[nickname] = client
-            
-            # Handle the new client in a seperate thread
-            thread = threading.Thread(target=self.handle, args=(client,))
-            thread.start()
-    
     
                 
 
